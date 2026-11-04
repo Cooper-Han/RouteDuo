@@ -54,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     private var statusLabel: NSTextField!
     private var defaultNetworkLabel: NSTextField!
     private var toggleItem: NSMenuItem!
+    private var defaultNetworkItem: NSMenuItem!
     private var helperButton: NSButton!
     private var helperConnection: NSXPCConnection?
     private var helperReady = false
@@ -129,6 +130,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         dnsCache = UserDefaults.standard.dictionary(forKey: dnsCacheKey) as? [String: [String]] ?? [:]
         updateStatusIcon()
         let menu = NSMenu()
+        defaultNetworkItem = NSMenuItem(title: "默认网络：读取中…", action: nil, keyEquivalent: "")
+        menu.addItem(defaultNetworkItem)
+        menu.addItem(.separator())
+        updateDefaultNetworkMenu(title: "默认网络：读取中…", color: .systemYellow)
         menu.addItem(NSMenuItem(title: "设置分流地址…", action: #selector(showSettings), keyEquivalent: ""))
         toggleItem = NSMenuItem(title: routesEnabled ? "关闭网络分流" : "启用网络分流", action: #selector(toggleRoutes), keyEquivalent: "")
         menu.addItem(toggleItem)
@@ -978,6 +983,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         if let store = SCDynamicStoreCreate(nil, "RouteDuo.NetworkEvents" as CFString, callback, &context) {
             let patterns = [
                 "State:/Network/Global/IPv4",
+                "State:/Network/Global/IPv6",
                 "State:/Network/Service/.*/IPv4",
                 "State:/Network/Service/.*/IPv6",
                 "State:/Network/Interface/.*/Link",
@@ -1376,7 +1382,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         currentTopology() == nil ? "当前只检测到一个可用网络，请连接第二个网络后再启用分流。" : nil
     }
 
+    private func updateDefaultNetworkMenu(title: String, color: NSColor) {
+        guard let item = defaultNetworkItem else { return }
+        // Attribute the text explicitly so this informational row is legible even
+        // though it has no action. The status image is not a template image.
+        item.title = title
+        item.attributedTitle = NSAttributedString(string: title, attributes: [.foregroundColor: NSColor.labelColor])
+        let dot = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 2, dy: 2)).fill()
+            return true
+        }
+        dot.isTemplate = false
+        item.image = dot
+        item.toolTip = "显示系统默认网络的本地连接状态，不代表外网一定可访问。"
+    }
+
+    private func defaultNetworkMenuSnapshot() -> (String, NSColor) {
+        guard let store = SCDynamicStoreCreate(nil, "RouteDuo.MenuNetwork" as CFString, nil, nil) else {
+            return ("默认网络：暂时无法读取", .systemYellow)
+        }
+        // Read the selected default service directly; do not require two networks
+        // and do not perform DNS queries or internet probes.
+        for family in ["IPv4", "IPv6"] {
+            guard let global = SCDynamicStoreCopyValue(store, "State:/Network/Global/\(family)" as CFString) as? [String: Any],
+                  let interface = global["PrimaryInterface"] as? String else { continue }
+            let id = global["PrimaryService"] as? String
+            var name = displayName(for: interface)
+            if let id, let prefs = SCPreferencesCreate(nil, "RouteDuo.MenuService" as CFString, nil),
+               let service = SCNetworkServiceCopy(prefs, id as CFString),
+               let configuredName = SCNetworkServiceGetName(service) as String? { name = configuredName }
+            let state = id.flatMap { SCDynamicStoreCopyValue(store, "State:/Network/Service/\($0)/\(family)" as CFString) as? [String: Any] }
+            let addresses = state?["Addresses"] as? [String] ?? []
+            let link = SCDynamicStoreCopyValue(store, "State:/Network/Interface/\(interface)/Link" as CFString) as? [String: Any]
+            if link?["Active"] as? Bool == false {
+                return ("默认网络：\(name) · 未连接", .systemRed)
+            }
+            if !addresses.isEmpty {
+                return ("默认网络：\(name) · 已连接", .systemGreen)
+            }
+            return ("默认网络：\(name) · 正在连接", .systemYellow)
+        }
+        return ("默认网络：未连接", .systemRed)
+    }
+
     private func refreshNetworkState() {
+        let menuStatus = defaultNetworkMenuSnapshot()
         let topology = currentTopology()
         let previousTopology = lastAvailableTopology
         if let topology { lastAvailableTopology = topology }
@@ -1390,6 +1441,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
             summary = "当前默认网络：未连接    分流网络：未连接"
         }
         DispatchQueue.main.async { [weak self] in
+            self?.updateDefaultNetworkMenu(title: menuStatus.0, color: menuStatus.1)
             self?.defaultNetworkLabel?.stringValue = summary
             self?.refreshServiceOrderStatuses()
             self?.verifySwitchedDefault(timedOut: false)
