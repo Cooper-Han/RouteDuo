@@ -46,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     private var updateTerminationPending = false
     private var enabledStatusImage: NSImage!
     private var disabledStatusImage: NSImage!
+    private var aboutWindow: NSWindow?
     private weak var window: NSWindow?
     private var showingSettings = false
     private var routesTable: NSTableView!
@@ -146,6 +147,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         updaterController = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: nil, userDriverDelegate: nil)
         let updateItem = NSMenuItem(title: "检查更新…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
         updateItem.target = updaterController
+        let aboutItem = NSMenuItem(title: "关于 RouteDuo…", action: #selector(showAbout), keyEquivalent: "")
+        aboutItem.target = self
+        menu.insertItem(aboutItem, at: menu.numberOfItems - 1)
         menu.insertItem(updateItem, at: menu.numberOfItems - 1)
         menu.insertItem(.separator(), at: menu.numberOfItems - 1)
         statusItem.menu = menu
@@ -157,9 +161,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
 
     func applicationDidBecomeActive(_ notification: Notification) {
         // 从 Finder、开机启动或重复点击应用时，只要没有配置窗口，保持纯菜单栏模式。
-        if !showingSettings, window?.isVisible != true, NSApp.activationPolicy() != .accessory {
+        if !showingSettings, window?.isVisible != true, aboutWindow?.isVisible != true, NSApp.activationPolicy() != .accessory {
             NSApp.setActivationPolicy(.accessory)
         }
+    }
+
+    @objc private func showAbout() {
+        func label(_ text: String, size: CGFloat, weight: NSFont.Weight = .regular, color: NSColor = .labelColor) -> NSTextField {
+            let field = NSTextField(labelWithString: text)
+            field.font = .systemFont(ofSize: size, weight: weight)
+            field.textColor = color
+            field.alignment = .center
+            return field
+        }
+        if aboutWindow == nil {
+            let panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 360),
+                                 styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            panel.title = "关于 RouteDuo"
+            panel.isReleasedWhenClosed = false
+            panel.delegate = self
+            panel.center()
+            let content = NSVisualEffectView()
+            content.material = .windowBackground
+            content.blendingMode = .behindWindow
+            panel.contentView = content
+            let icon = NSImageView(image: NSApp.applicationIconImage)
+            icon.imageScaling = .scaleProportionallyUpOrDown
+            icon.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: 88), icon.heightAnchor.constraint(equalToConstant: 88)])
+            let title = label("RouteDuo", size: 23, weight: .semibold)
+            let info = Bundle.main.infoDictionary ?? [:]
+            let version = info["CFBundleShortVersionString"] as? String ?? ""
+            let build = info["CFBundleVersion"] as? String ?? ""
+            let versionLabel = label("版本 \(version)（\(build)）", size: 13, color: .secondaryLabelColor)
+            let description = label("配置的地址走分流网络，其他流量走默认网络。", size: 13, color: .secondaryLabelColor)
+            let link = NSTextField(labelWithString: "")
+            link.attributedStringValue = NSAttributedString(string: "github.com/Cooper-Han/RouteDuo", attributes: [
+                .link: URL(string: "https://github.com/Cooper-Han/RouteDuo")!,
+                .font: NSFont.systemFont(ofSize: 13),
+                .underlineStyle: NSUnderlineStyle.single.rawValue
+            ])
+            link.isSelectable = true
+            link.allowsEditingTextAttributes = true
+            link.alignment = .center
+            link.setAccessibilityLabel("GitHub 仓库链接")
+            let column = NSStackView(views: [icon, title, versionLabel, description, link])
+            column.orientation = .vertical
+            column.alignment = .centerX
+            column.spacing = 14
+            column.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(column)
+            NSLayoutConstraint.activate([
+                column.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+                column.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+                column.leadingAnchor.constraint(greaterThanOrEqualTo: content.leadingAnchor, constant: 24),
+                column.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -24)
+            ])
+            aboutWindow = panel
+        }
+        aboutWindow?.orderFront(nil)
+        NSApp.setActivationPolicy(.regular)
+        aboutWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func showSettings() {
@@ -420,12 +483,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     }
 
     func windowWillClose(_ notification: Notification) {
-        guard let closingWindow = notification.object as? NSWindow, closingWindow === window else { return }
-        showingSettings = false
-        // 先隐藏窗口，再在下一轮事件循环隐藏 Dock，避免两种窗口状态同时切换。
+        guard let closingWindow = notification.object as? NSWindow,
+              closingWindow === window || closingWindow === aboutWindow else { return }
+        if closingWindow === window { showingSettings = false }
         closingWindow.orderOut(nil)
         DispatchQueue.main.async { [weak self] in
-            guard let self, !self.showingSettings, self.window?.isVisible != true else { return }
+            guard let self, !self.showingSettings, self.window?.isVisible != true,
+                  self.aboutWindow?.isVisible != true else { return }
             if NSApp.activationPolicy() != .accessory { NSApp.setActivationPolicy(.accessory) }
         }
     }
