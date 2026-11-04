@@ -10,7 +10,7 @@ Sparkle 更新签名使用独立 Ed25519 密钥，保存在 macOS 钥匙串，�
 
 ## 每次发布
 
-1. 在主 App 两个配置中递增 `CURRENT_PROJECT_VERSION`，更新 `MARKETING_VERSION`。构建号必须始终递增。
+1. 更新主 App 的 `MARKETING_VERSION`。打包脚本自动将 `CURRENT_PROJECT_VERSION` 设为上海日期加两位序号（例如 `2026110401`），写回 Debug/Release 两个配置。失败构建也消耗序号；同日最多 99 次；时钟回拨时继续沿用较大的已有日期递增，避免更新号倒退。打包必须串行执行，并将生成后的工程配置提交。
 2. 执行 `./Installer/build-pkg.sh` 构建并签名 App、辅助程序和安装包。
 3. 执行 `SPARKLE_TOOLS=/path/to/Sparkle/bin ./Scripts/prepare-update.sh`，生成更新 zip 和已验证的 appcast。
 4. 在 GitHub 创建 `v版本号` Release，上传 `Build/Updates/版本号-构建号/` 中的 `appcast.xml`、App zip 和安装 pkg。三个文件应来自同一次构建。

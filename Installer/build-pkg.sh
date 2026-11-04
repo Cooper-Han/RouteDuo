@@ -6,6 +6,9 @@ OUT="${ROOT}/Build/Installer"
 : "${DEVELOPER_ID_APPLICATION:=Developer ID Application: Shenyang Dadong District Duomisuo Education Technology Co., Ltd. (959Y964X4N)}"
 : "${DEVELOPER_ID_INSTALLER:=Developer ID Installer: Shenyang Dadong District Duomisuo Education Technology Co., Ltd. (959Y964X4N)}"
 
+# Reserve before building; failed attempts also consume a number.
+BUILD_NUMBER=$(python3 "$ROOT/Scripts/next-build-number.py")
+echo "构建号：$BUILD_NUMBER"
 rm -rf "$DERIVED" "$OUT"
 mkdir -p "$OUT/Payload/Applications"
 xcodebuild -project "$ROOT/WorkRouteMenu.xcodeproj" -scheme WorkRouteMenu -configuration Release -arch arm64 -derivedDataPath "$DERIVED" -clonedSourcePackagesDirPath "$ROOT/Build/SourcePackages" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$DEVELOPER_ID_APPLICATION" DEVELOPMENT_TEAM=959Y964X4N build
