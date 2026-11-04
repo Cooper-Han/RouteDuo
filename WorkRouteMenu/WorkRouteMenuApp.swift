@@ -55,6 +55,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     private var defaultNetworkLabel: NSTextField!
     private var toggleItem: NSMenuItem!
     private var defaultNetworkItem: NSMenuItem!
+    private var defaultNetworkText: NSTextField?
+    private var defaultNetworkDot: NSImageView?
+    private var lastDefaultNetworkStatus: DefaultNetworkStatus?
+    private struct DefaultNetworkStatus {
+        let title: String
+        let color: NSColor
+        let identity: String?
+        let name: String?
+        let connected: Bool
+        let settled: Bool
+    }
     private var helperButton: NSButton!
     private var helperConnection: NSXPCConnection?
     private var helperReady = false
@@ -1384,23 +1395,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
 
     private func updateDefaultNetworkMenu(title: String, color: NSColor) {
         guard let item = defaultNetworkItem else { return }
-        // Attribute the text explicitly so this informational row is legible even
-        // though it has no action. The status image is not a template image.
+        // A noninteractive custom view avoids AppKit dimming a disabled menu
+        // item (including its status image).
+        if item.view == nil {
+            let container = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 30))
+            let imageView = NSImageView(frame: NSRect(x: 14, y: 9, width: 12, height: 12))
+            let text = NSTextField(labelWithString: title)
+            text.font = .menuFont(ofSize: 13)
+            text.textColor = .labelColor
+            text.frame = NSRect(x: 32, y: 7, width: 276, height: 18)
+            container.addSubview(imageView)
+            container.addSubview(text)
+            defaultNetworkDot = imageView
+            defaultNetworkText = text
+            item.view = container
+        }
+        defaultNetworkText?.stringValue = title
+        let width = max(300, (title as NSString).size(withAttributes: [.font: NSFont.menuFont(ofSize: 13)]).width + 52)
+        item.view?.setFrameSize(NSSize(width: width, height: 30))
+        defaultNetworkText?.frame.size.width = width - 44
         item.title = title
-        item.attributedTitle = NSAttributedString(string: title, attributes: [.foregroundColor: NSColor.labelColor])
         let dot = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
             color.setFill()
             NSBezierPath(ovalIn: rect.insetBy(dx: 2, dy: 2)).fill()
             return true
         }
         dot.isTemplate = false
-        item.image = dot
+        defaultNetworkDot?.image = dot
         item.toolTip = "显示系统默认网络的本地连接状态，不代表外网一定可访问。"
     }
 
-    private func defaultNetworkMenuSnapshot() -> (String, NSColor) {
+    private func defaultNetworkMenuSnapshot() -> DefaultNetworkStatus {
         guard let store = SCDynamicStoreCreate(nil, "RouteDuo.MenuNetwork" as CFString, nil, nil) else {
-            return ("默认网络：暂时无法读取", .systemYellow)
+            return DefaultNetworkStatus(title: "默认网络：暂时无法读取", color: .systemYellow, identity: nil, name: nil, connected: false, settled: false)
         }
         // Read the selected default service directly; do not require two networks
         // and do not perform DNS queries or internet probes.
@@ -1416,14 +1443,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
             let addresses = state?["Addresses"] as? [String] ?? []
             let link = SCDynamicStoreCopyValue(store, "State:/Network/Interface/\(interface)/Link" as CFString) as? [String: Any]
             if link?["Active"] as? Bool == false {
-                return ("默认网络：\(name) · 未连接", .systemRed)
+                return DefaultNetworkStatus(title: "默认网络：\(name) · 未连接", color: .systemRed, identity: nil, name: name, connected: false, settled: true)
             }
             if !addresses.isEmpty {
-                return ("默认网络：\(name) · 已连接", .systemGreen)
+                return DefaultNetworkStatus(title: "默认网络：\(name) · 已连接", color: .systemGreen, identity: id ?? interface, name: name, connected: true, settled: true)
             }
-            return ("默认网络：\(name) · 正在连接", .systemYellow)
+            return DefaultNetworkStatus(title: "默认网络：\(name) · 正在连接", color: .systemYellow, identity: id ?? interface, name: name, connected: false, settled: false)
         }
-        return ("默认网络：未连接", .systemRed)
+        return DefaultNetworkStatus(title: "默认网络：未连接", color: .systemRed, identity: nil, name: nil, connected: false, settled: true)
+    }
+
+    private func notifyDefaultNetworkChange(_ status: DefaultNetworkStatus) {
+        // Ignore intermediate connecting states and duplicate system events.
+        guard status.settled else { return }
+        defer { lastDefaultNetworkStatus = status }
+        guard let previous = lastDefaultNetworkStatus,
+              previous.identity != status.identity || previous.connected != status.connected else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "默认网络已变化"
+        if status.connected {
+            if previous.connected {
+                content.body = "默认网络已从 \(previous.name ?? "原网络") 切换为 \(status.name ?? "新网络")。"
+            } else {
+                content.body = "默认网络已连接：\(status.name ?? "当前网络")。"
+            }
+        } else {
+            content.body = "\(previous.name ?? "默认网络") 已断开，当前没有可用的默认网络。"
+        }
+        content.sound = .default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "RouteDuo.defaultNetworkChanged", content: content, trigger: nil))
     }
 
     private func refreshNetworkState() {
@@ -1441,7 +1489,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
             summary = "当前默认网络：未连接    分流网络：未连接"
         }
         DispatchQueue.main.async { [weak self] in
-            self?.updateDefaultNetworkMenu(title: menuStatus.0, color: menuStatus.1)
+            self?.updateDefaultNetworkMenu(title: menuStatus.title, color: menuStatus.color)
+            self?.notifyDefaultNetworkChange(menuStatus)
             self?.defaultNetworkLabel?.stringValue = summary
             self?.refreshServiceOrderStatuses()
             self?.verifySwitchedDefault(timedOut: false)
