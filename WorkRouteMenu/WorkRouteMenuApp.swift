@@ -149,8 +149,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         updateItem.target = updaterController
         let aboutItem = NSMenuItem(title: "关于 RouteDuo…", action: #selector(showAbout), keyEquivalent: "")
         aboutItem.target = self
-        menu.insertItem(aboutItem, at: menu.numberOfItems - 1)
         menu.insertItem(updateItem, at: menu.numberOfItems - 1)
+        menu.insertItem(aboutItem, at: menu.numberOfItems - 1)
         menu.insertItem(.separator(), at: menu.numberOfItems - 1)
         statusItem.menu = menu
         updaterController.startUpdater()
