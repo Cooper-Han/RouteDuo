@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     private let routeRowPasteboardType = NSPasteboard.PasteboardType("com.cooper.RouteDuo.route-row")
     private var statusItem: NSStatusItem!
     private var updaterController: SPUStandardUpdaterController!
+    private var automaticUpdateItem: NSMenuItem!
     private var updateTerminationPending = false
     private var enabledStatusImage: NSImage!
     private var disabledStatusImage: NSImage!
@@ -149,11 +150,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         updateItem.target = updaterController
         let aboutItem = NSMenuItem(title: "关于 RouteDuo…", action: #selector(showAbout), keyEquivalent: "")
         aboutItem.target = self
+        automaticUpdateItem = NSMenuItem(title: "自动更新", action: #selector(toggleAutomaticUpdates), keyEquivalent: "")
+        automaticUpdateItem.target = self
+        menu.insertItem(automaticUpdateItem, at: menu.numberOfItems - 1)
         menu.insertItem(updateItem, at: menu.numberOfItems - 1)
         menu.insertItem(aboutItem, at: menu.numberOfItems - 1)
         menu.insertItem(.separator(), at: menu.numberOfItems - 1)
         statusItem.menu = menu
         updaterController.startUpdater()
+        // One-time migration from releases that explicitly disallowed updates.
+        // Subsequent launches preserve the user's Sparkle settings.
+        if !UserDefaults.standard.bool(forKey: "automaticUpdatesMigration1") {
+            updaterController.updater.automaticallyChecksForUpdates = true
+            updaterController.updater.automaticallyDownloadsUpdates = true
+            UserDefaults.standard.set(true, forKey: "automaticUpdatesMigration1")
+        }
+        automaticUpdateItem.state = updaterController.updater.automaticallyChecksForUpdates && updaterController.updater.automaticallyDownloadsUpdates ? .on : .off
         refreshHelperHealth()
         startNetworkMonitoring()
         refreshConfiguredDomainsInBackground()
@@ -164,6 +176,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         if !showingSettings, window?.isVisible != true, aboutWindow?.isVisible != true, NSApp.activationPolicy() != .accessory {
             NSApp.setActivationPolicy(.accessory)
         }
+    }
+
+    @objc private func toggleAutomaticUpdates() {
+        let updater = updaterController.updater
+        let enable = !(updater.automaticallyChecksForUpdates && updater.automaticallyDownloadsUpdates)
+        updater.automaticallyChecksForUpdates = enable
+        updater.automaticallyDownloadsUpdates = enable
+        automaticUpdateItem.state = enable ? .on : .off
     }
 
     @objc private func showAbout() {
