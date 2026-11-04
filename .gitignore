@@ -1,0 +1,23 @@
+# Build output and local machine data
+.DS_Store
+Build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+.env
+.env.*
+!.env.example
+*.local.xcconfig
+*.p12
+*.p8
+*.mobileprovision
+*.provisionprofile
+*.key
+*.pem
+*.cer
+*.log
+# Never commit update signing keys or notarization credentials
+PrivateKeys/
+Secrets/
+sparkle-private-key*

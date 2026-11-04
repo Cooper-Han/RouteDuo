@@ -1,0 +1,20 @@
+{
+  "fill": {
+    "automatic-gradient": "srgb:0.36,0.34,0.86,1"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "mark.svg",
+          "name": "双环连接"
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}
