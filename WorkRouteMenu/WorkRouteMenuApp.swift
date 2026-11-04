@@ -584,19 +584,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         }
     }
 
-    private func helperVersionMatches() -> Bool {
-        guard let bundled = Bundle.main.url(forResource: "com.cooper.WorkRouteMenu.helper", withExtension: nil),
-              let expected = try? Data(contentsOf: bundled),
-              let actual = try? Data(contentsOf: URL(fileURLWithPath: "/Library/PrivilegedHelperTools/com.cooper.WorkRouteMenu.helper")) else { return false }
-        return expected == actual
-    }
+    // Independent helper release version. Bump together with healthCheck's
+    // response only when shipping a helper change that requires installation.
+    private let requiredHelperVersion = "RouteDuoHelper/2"
 
     private func refreshHelperHealth() {
         guard !helperInstallationInProgress, !enableInProgress, !disableInProgress,
               !networkReconfigurationInProgress, !networkSwitchInProgress else { return }
-        guard helperInstalled(), helperVersionMatches() else {
+        guard helperInstalled() else {
             helperReady = false
-            helperStatus = helperInstalled() ? "辅助服务需要更新，请点击修复" : "尚未安装辅助服务"
+            helperStatus = "尚未安装辅助服务"
             updateHelperButton()
             return
         }
@@ -604,8 +601,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         updateHelperButton()
         requestHelper(timeout: 5) { proxy, reply in proxy.healthCheck(withReply: reply) } completion: { [weak self] success, output in
             guard let self else { return }
-            self.helperReady = success && output == "RouteDuoHelper/2"
-            self.helperStatus = self.helperReady ? "辅助服务正常 · 已开启异常退出清理" : "辅助服务不可用，请点击修复：\(output)"
+            self.helperReady = success && output == self.requiredHelperVersion
+            if self.helperReady {
+                self.helperStatus = "辅助服务正常 · 无需更新"
+            } else if success {
+                self.helperStatus = "辅助服务版本需要更新，请点击修复"
+            } else {
+                self.helperStatus = "辅助服务不可用，请点击修复：\(output)"
+            }
             self.updateHelperButton()
             if self.helperReady, !self.routesEnabled, !self.enableInProgress {
                 UserDefaults.standard.removeObject(forKey: self.appliedRoutesKey)
@@ -972,7 +975,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
 
     private func startNetworkMonitoring() {
         stopNetworkMonitoring()
-        helperConnection?.invalidate()
         let wifiMonitor = NWPathMonitor(requiredInterfaceType: .wifi)
         let wiredMonitor = NWPathMonitor(requiredInterfaceType: .wiredEthernet)
         let generalMonitor = NWPathMonitor()
@@ -1099,26 +1101,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
             statusLabel?.stringValue = "当前操作尚未完成，请稍后再切换网络。"
             return
         }
-        guard helperInstalled(), helperServiceRegistered() else {
+        guard helperReady else {
             let alert = NSAlert()
-            alert.messageText = "需要安装或修复辅助程序"
-            alert.informativeText = "系统辅助服务未注册或不可用，无法保存服务顺序。点击修复会重新注册服务，完成后请重新设定顺序。"
-            alert.addButton(withTitle: "安装或修复")
-            alert.addButton(withTitle: "取消")
-            if alert.runModal() == .alertFirstButtonReturn { installHelper() }
-            return
-        }
-        // 安装 App 不会替换 /Library 中已运行的旧辅助程序。
-        if let bundled = Bundle.main.url(forResource: "com.cooper.WorkRouteMenu.helper", withExtension: nil),
-           let packagedData = try? Data(contentsOf: bundled),
-           let installedData = try? Data(contentsOf: URL(fileURLWithPath: "/Library/PrivilegedHelperTools/com.cooper.WorkRouteMenu.helper")),
-           packagedData != installedData {
-            let alert = NSAlert()
-            alert.messageText = "需要更新辅助程序"
-            alert.informativeText = "已安装的辅助程序与当前 App 版本不同，更新后才能保存服务顺序。更新需要管理员授权。"
-            alert.addButton(withTitle: "更新辅助程序")
-            alert.addButton(withTitle: "取消")
-            if alert.runModal() == .alertFirstButtonReturn { installHelper() }
+            alert.messageText = "辅助服务尚未就绪"
+            alert.informativeText = helperStatus + "。如正在检查，请稍后重试；未安装、版本不匹配或连接失败时才需要安装或修复。"
+            alert.addButton(withTitle: "知道了")
+            alert.runModal()
             return
         }
         guard let preferences = SCPreferencesCreate(nil, "RouteDuo.Switch" as CFString, nil),

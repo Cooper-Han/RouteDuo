@@ -21,3 +21,7 @@ Sparkle 更新签名使用独立 Ed25519 密钥，保存在 macOS 钥匙串，�
 ## GitHub 首次上传
 
 工程完成整理后提交到仓库 main 分支；保留仓库原有 LICENSE。Git 推送需要本机已登录 GitHub。上传 Release 可在网页完成，或安装并登录 GitHub CLI 后使用 `gh release create`。
+
+## 辅助程序独立版本
+
+主 App 使用 XPC healthCheck 返回的 `RouteDuoHelper/2` 判断辅助程序版本，不比较带签名的可执行文件字节。只修改主 App 无需重新安装辅助程序。发布辅助程序功能或协议变更时，必须同时递增 `PrivilegedHelper/main.swift` 的版本响应和主 App 的 `requiredHelperVersion`，才会提示用户授权更新。签名和服务连通性仍由系统及健康检查验证。
