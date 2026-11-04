@@ -191,7 +191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
             return field
         }
         if aboutWindow == nil {
-            let panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 360),
+            let panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 550, height: 360),
                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
             panel.title = "关于 RouteDuo"
             panel.isReleasedWhenClosed = false
@@ -212,11 +212,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
             let versionLabel = label("版本 \(version)（\(build)）", size: 13, color: .secondaryLabelColor)
             let description = label("配置的地址走分流网络，其他流量走默认网络。", size: 13, color: .secondaryLabelColor)
             let link = NSTextField(labelWithString: "")
-            link.attributedStringValue = NSAttributedString(string: "github.com/Cooper-Han/RouteDuo", attributes: [
-                .link: URL(string: "https://github.com/Cooper-Han/RouteDuo")!,
+            let repositoryURL = "https://github.com/Cooper-Han/RouteDuo"
+            let repositoryLine = NSMutableAttributedString(string: "GitHub for RouteDuo:  ", attributes: [
                 .font: NSFont.systemFont(ofSize: 13),
-                .underlineStyle: NSUnderlineStyle.single.rawValue
+                .foregroundColor: NSColor.labelColor
             ])
+            repositoryLine.append(NSAttributedString(string: repositoryURL, attributes: [
+                .link: URL(string: repositoryURL)!,
+                .font: NSFont.systemFont(ofSize: 13),
+                .foregroundColor: NSColor.linkColor,
+                .underlineStyle: NSUnderlineStyle.single.rawValue
+            ]))
+            link.attributedStringValue = repositoryLine
+            link.lineBreakMode = .byClipping
+            link.maximumNumberOfLines = 1
             link.isSelectable = true
             link.allowsEditingTextAttributes = true
             link.alignment = .center
