@@ -10,10 +10,6 @@
 	</array>
 	<key>SUAllowsAutomaticUpdates</key>
 	<true/>
-	<key>SUAutomaticallyUpdate</key>
-	<true/>
-	<key>SUEnableAutomaticChecks</key>
-	<true/>
 	<key>SUFeedURL</key>
 	<string>https://github.com/Cooper-Han/RouteDuo/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
