@@ -57,7 +57,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     private var defaultNetworkItem: NSMenuItem!
     private var defaultNetworkText: NSTextField?
     private var defaultNetworkDot: NSImageView?
-    private var lastDefaultNetworkStatus: DefaultNetworkStatus?
     private struct DefaultNetworkStatus {
         let title: String
         let color: NSColor
@@ -1450,27 +1449,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         return DefaultNetworkStatus(title: "默认网络：未连接", color: .systemRed, identity: nil, name: nil, connected: false, settled: true)
     }
 
-    private func notifyDefaultNetworkChange(_ status: DefaultNetworkStatus) {
-        // Ignore intermediate connecting states and duplicate system events.
-        guard status.settled else { return }
-        defer { lastDefaultNetworkStatus = status }
-        guard let previous = lastDefaultNetworkStatus,
-              previous.identity != status.identity || previous.connected != status.connected else { return }
-        let content = UNMutableNotificationContent()
-        content.title = "默认网络已变化"
-        if status.connected {
-            if previous.connected {
-                content.body = "默认网络已从 \(previous.name ?? "原网络") 切换为 \(status.name ?? "新网络")。"
-            } else {
-                content.body = "默认网络已连接：\(status.name ?? "当前网络")。"
-            }
-        } else {
-            content.body = "\(previous.name ?? "默认网络") 已断开，当前没有可用的默认网络。"
-        }
-        content.sound = .default
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "RouteDuo.defaultNetworkChanged", content: content, trigger: nil))
-    }
-
     private func refreshNetworkState() {
         let menuStatus = defaultNetworkMenuSnapshot()
         let topology = currentTopology()
@@ -1487,7 +1465,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         }
         DispatchQueue.main.async { [weak self] in
             self?.updateDefaultNetworkMenu(title: menuStatus.title, color: menuStatus.color)
-            self?.notifyDefaultNetworkChange(menuStatus)
             self?.defaultNetworkLabel?.stringValue = summary
             self?.refreshServiceOrderStatuses()
             self?.verifySwitchedDefault(timedOut: false)
