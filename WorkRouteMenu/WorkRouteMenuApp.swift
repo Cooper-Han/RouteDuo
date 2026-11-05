@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     private let routeRowPasteboardType = NSPasteboard.PasteboardType("com.cooper.RouteDuo.route-row")
     private var statusItem: NSStatusItem!
     private var updaterController: SPUStandardUpdaterController!
+    private var diagnosticExportInProgress = false
     private var updateTerminationPending = false
     private var enabledStatusImage: NSImage!
     private var disabledStatusImage: NSImage!
@@ -83,7 +84,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
 
     private weak var removeAddressButton: NSButton?
     private var pendingUninstall = false
-    private var pendingQuit = false
     private var launchAtLoginItem: NSMenuItem!
     private var autoEnableItem: NSMenuItem!
     private var routesEnabled = false
@@ -164,14 +164,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         updateItem.target = updaterController
         let aboutItem = NSMenuItem(title: "关于 RouteDuo…", action: #selector(showAbout), keyEquivalent: "")
         aboutItem.target = self
-        menu.insertItem(updateItem, at: menu.numberOfItems - 1)
-        menu.insertItem(aboutItem, at: menu.numberOfItems - 1)
+        let helpMenu = NSMenu(title: "帮助")
+        helpMenu.addItem(updateItem)
+        helpMenu.addItem(aboutItem)
+        let diagnosticsItem = NSMenuItem(title: "导出日志…", action: #selector(exportDiagnostics), keyEquivalent: "")
+        diagnosticsItem.target = self
+        helpMenu.addItem(diagnosticsItem)
+        let helpItem = NSMenuItem(title: "帮助", action: nil, keyEquivalent: "")
+        helpItem.submenu = helpMenu
+        menu.insertItem(helpItem, at: menu.numberOfItems - 1)
         menu.insertItem(.separator(), at: menu.numberOfItems - 1)
         statusItem.menu = menu
         updaterController.startUpdater()
         refreshHelperHealth()
         startNetworkMonitoring()
         refreshConfiguredDomainsInBackground()
+    }
+
+    @objc private func exportDiagnostics() {
+        guard !diagnosticExportInProgress else { return }
+        let panel = NSSavePanel()
+        panel.title = "导出诊断信息"
+        panel.message = "包含网络地址、分流地址和操作日志，可能涉及内部网络信息；分享前请检查内容。不包含密码或钥匙串信息。"
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        panel.nameFieldStringValue = "RouteDuo-诊断-\(formatter.string(from: Date())).txt"
+        panel.canCreateDirectories = true
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        diagnosticExportInProgress = true
+        let info = Bundle.main.infoDictionary ?? [:]
+        let snapshot = """
+        RouteDuo 诊断报告
+        导出时间：\(ISO8601DateFormatter().string(from: Date()))
+        App：\(info["CFBundleShortVersionString"] ?? "未知") (\(info["CFBundleVersion"] ?? "未知"))
+        系统：\(ProcessInfo.processInfo.operatingSystemVersionString)
+        分流状态：\(routesEnabled ? "已启用" : "未启用")
+        正在启用：\(enableInProgress)，正在关闭：\(disableInProgress)
+        自动启用：\(UserDefaults.standard.bool(forKey: autoEnableKey))
+        开机启动：\(isLaunchAtLoginEnabled())
+        辅助程序已安装：\(helperInstalled())
+        辅助程序最近检查结果：\(helperStatus)
+        辅助程序期望版本：\(requiredHelperVersion)
+        \(currentDefaultNetworkSummary())
+
+        配置的分流地址（不含备注）：
+        \(routeRows.compactMap { $0.first }.joined(separator: "\n"))
+
+        当前会话记录的分流 IP：
+        \(appliedRouteIPs().joined(separator: "\n"))
+        """
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result: Result<Void, Error> = Result {
+                let report = DiagnosticReport.collect(snapshot: snapshot)
+                try report.write(to: destination, atomically: true, encoding: .utf8)
+            }
+            DispatchQueue.main.async {
+                self?.diagnosticExportInProgress = false
+                let alert = NSAlert()
+                switch result {
+                case .success:
+                    alert.messageText = "诊断信息已导出"
+                    alert.informativeText = destination.path
+                    alert.addButton(withTitle: "在 Finder 中显示")
+                    alert.addButton(withTitle: "完成")
+                    if alert.runModal() == .alertFirstButtonReturn {
+                        NSWorkspace.shared.activateFileViewerSelecting([destination])
+                    }
+                case .failure(let error):
+                    alert.messageText = "导出失败"
+                    alert.informativeText = error.localizedDescription
+                    alert.runModal()
+                }
+            }
+        }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -684,7 +750,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         enableInProgress = false
         disableInProgress = false
         networkReconfigurationInProgress = false
-        pendingQuit = false
         pendingUninstall = false
         if networkSwitchInProgress { finishNetworkSwitch(error: message) }
         finishAutomaticDisable(message: message)
@@ -1105,7 +1170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     @objc private func switchNetworks() {
         guard !networkSwitchInProgress, !enableInProgress, !disableInProgress,
               !networkReconfigurationInProgress, !addressChangeCleanupPending,
-              !pendingQuit, !pendingUninstall else {
+              !updateTerminationPending, !pendingUninstall else {
             statusLabel?.stringValue = "当前操作尚未完成，请稍后再切换网络。"
             return
         }
@@ -1471,6 +1536,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         }
 
         guard !disableInProgress, !addressChangeCleanupPending, !networkSwitchInProgress else { return }
+        guard !updateTerminationPending else { return }
         guard routesEnabled || UserDefaults.standard.bool(forKey: autoEnableKey) else { return }
         if !routesEnabled, UserDefaults.standard.bool(forKey: autoEnableKey), topology != nil, !enableInProgress {
             DispatchQueue.main.async { [weak self] in self?.enableRoutes(automatically: true) }
@@ -1548,10 +1614,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         if wasEnabled && notifyOnDisable {
             notifyDisabled(reason: message)
         }
-        if pendingQuit {
-            pendingQuit = false
-            NSApp.terminate(nil)
-        }
+
     }
 
     private func notifyEnabled(networkName: String) {
@@ -1754,12 +1817,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
                     } else if !isDelete, notifyOnEnable, self?.addressChangeCleanupPending != true {
                         self?.notifyEnabled(networkName: self?.cachedTopologySnapshot()?.secondary.name ?? "分流网络")
                     }
-                    if isDelete && self?.pendingQuit == true {
-                        self?.pendingQuit = false
-                        NSApp.terminate(nil)
-                    }
                 } else if isDelete {
-                    self?.pendingQuit = false
                     self?.pendingUninstall = false
                 } else {
                     self?.finishAutomaticDisable(message: "启用失败：\(output)", notifyOnDisable: false)
@@ -1968,7 +2026,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     }
 
     @objc private func enableRoutes(automatically: Bool = false) {
-        guard !enableInProgress, !disableInProgress, !routesEnabled, !pendingQuit, !pendingUninstall else { return }
+        guard !enableInProgress, !disableInProgress, !routesEnabled, !updateTerminationPending, !pendingUninstall else { return }
         if automatically && (!UserDefaults.standard.bool(forKey: autoEnableKey) || autoEnablePausedForSession) { return }
         guard !addressChangeCleanupPending, !networkSwitchInProgress else { return }
         let domains = cleanedDomains()
@@ -2055,17 +2113,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     }
 
     @objc private func quit() {
-        guard !networkSwitchInProgress else {
-            statusLabel?.stringValue = "正在切换系统网络，请完成后再退出。"
-            return
-        }
-        guard !pendingQuit else { return }
-        if routesEnabled || !appliedRouteIPs().isEmpty {
-            pendingQuit = true
-            disableRoutes(message: "已关闭网络分流，正在退出。", notifyOnDisable: false)
-        } else {
-            NSApp.terminate(nil)
-        }
+        // All exit paths use applicationShouldTerminate: clean routes first,
+        // then finish the pending termination with AppKit's reply API.
+        NSApp.terminate(nil)
     }
 
 }
