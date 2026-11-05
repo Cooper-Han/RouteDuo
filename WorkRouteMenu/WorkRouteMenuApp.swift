@@ -147,6 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         menu.addItem(NSMenuItem(title: "设置分流地址…", action: #selector(showSettings), keyEquivalent: ""))
         toggleItem = NSMenuItem(title: routesEnabled ? "关闭网络分流" : "启用网络分流", action: #selector(toggleRoutes), keyEquivalent: "")
         menu.addItem(toggleItem)
+        toggleItem.target = self
         toggleItem.isEnabled = true
         menu.addItem(.separator())
         launchAtLoginItem = NSMenuItem(title: "开机自动启动", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
@@ -174,6 +175,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         helpItem.submenu = helpMenu
         menu.insertItem(helpItem, at: menu.numberOfItems - 1)
         menu.insertItem(.separator(), at: menu.numberOfItems - 1)
+        for item in menu.items where item.action != nil && item.target == nil {
+            item.target = self
+        }
         statusItem.menu = menu
         updaterController.startUpdater()
         refreshHelperHealth()
@@ -660,7 +664,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
 
     // Independent helper release version. Bump together with healthCheck's
     // response only when shipping a helper change that requires installation.
-    private let requiredHelperVersion = "RouteDuoHelper/2"
+    private let requiredHelperVersion = "RouteDuoHelper/3"
 
     private func refreshHelperHealth() {
         guard !helperInstallationInProgress, !enableInProgress, !disableInProgress,
@@ -1791,8 +1795,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
             command.replacingOccurrences(of: "/sbin/route", with: "route")
                 .components(separatedBy: " 2>/dev/null || ").first ?? command
         }
+        logServiceOrder("路由请求 action=\(isDelete ? "delete" : "add") count=\(routes.count)")
         let reply: (Bool, String) -> Void = { [weak self] success, output in
             DispatchQueue.main.async {
+                self?.logServiceOrder("路由返回 action=\(isDelete ? "delete" : "add") success=\(success) output=\(output)")
                 self?.statusLabel?.stringValue = success ? message : "操作失败：\(output)"
                 if success {
                     let wasEnabled = self?.routesEnabled == true
@@ -1847,6 +1853,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
                     else { self?.finishNetworkSwitch(error: output) }
                 }
                 self?.finishAddressChangeCleanupIfReady()
+                if !success, !isDelete, !notifyOnEnable {
+                    self?.showRoutingMessage("启用网络分流失败", output.isEmpty ? "辅助程序未返回错误详情，请导出日志排查。" : output)
+                }
             }
         }
         requestHelper { proxy, completion in
@@ -2005,7 +2014,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     }
 
     @objc private func toggleRoutes() {
-        guard !enableInProgress, !disableInProgress, !networkSwitchInProgress else { return }
+        // Leave the menu tracking loop before presenting alerts or invoking XPC.
+        DispatchQueue.main.async { [weak self] in self?.handleToggleRoutes() }
+    }
+
+    private func handleToggleRoutes() {
+        logServiceOrder("手动切换分流 enabled=\(routesEnabled) enabling=\(enableInProgress) disabling=\(disableInProgress) switching=\(networkSwitchInProgress) terminating=\(updateTerminationPending) helperReady=\(helperReady) addressCleanup=\(addressChangeCleanupPending)")
+        guard !enableInProgress, !disableInProgress, !networkSwitchInProgress,
+              !updateTerminationPending, !pendingUninstall, !addressChangeCleanupPending else {
+            showRoutingMessage("当前操作尚未完成", "正在处理网络或辅助程序操作，请稍后再试。")
+            return
+        }
         if !routesEnabled && cleanedDomains().isEmpty {
             showMissingAddressesAlert()
             return
@@ -2023,6 +2042,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
             return
         }
         if routesEnabled { disableRoutes() } else { enableRoutes() }
+    }
+
+    private func showRoutingMessage(_ title: String, _ message: String) {
+        logServiceOrder("\(title)：\(message)")
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "知道了")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     @objc private func enableRoutes(automatically: Bool = false) {
@@ -2046,6 +2075,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         let available = immediatelyAvailableIPs(domains)
         guard !available.ips.isEmpty else {
             statusLabel?.stringValue = "网站地址正在后台解析，请稍后再试。"
+            if !automatically { showRoutingMessage("暂时无法启用网络分流", "网站地址尚未解析成功，正在后台重试。请检查 DNS 或使用目标 IP 地址。") }
             refreshConfiguredDomainsInBackground()
             return
         }

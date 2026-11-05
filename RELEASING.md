@@ -24,4 +24,4 @@ Sparkle 更新签名使用独立 Ed25519 密钥，保存在 macOS 钥匙串，�
 
 ## 辅助程序独立版本
 
-主 App 使用 XPC healthCheck 返回的 `RouteDuoHelper/2` 判断辅助程序版本，不比较带签名的可执行文件字节。只修改主 App 无需重新安装辅助程序。发布辅助程序功能或协议变更时，必须同时递增 `PrivilegedHelper/main.swift` 的版本响应和主 App 的 `requiredHelperVersion`，才会提示用户授权更新。签名和服务连通性仍由系统及健康检查验证。
+主 App 使用 XPC healthCheck 返回的 `RouteDuoHelper/3` 判断辅助程序版本，不比较带签名的可执行文件字节。只修改主 App 无需重新安装辅助程序。发布辅助程序功能或协议变更时，必须同时递增 `PrivilegedHelper/main.swift` 的版本响应和主 App 的 `requiredHelperVersion`，才会提示用户授权更新。签名和服务连通性仍由系统及健康检查验证。

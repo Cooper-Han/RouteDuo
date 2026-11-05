@@ -21,6 +21,18 @@ private struct OwnedRoute: Codable, Equatable {
     let gateway: String
     let owner: UUID
 }
+enum RouteLookup {
+    static func hasExactHostRoute(_ output: String, destination: String) -> Bool {
+        let fields = output.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        return fields.contains("destination: \(destination)") && fields.contains { field in
+            guard field.hasPrefix("flags:"), let start = field.firstIndex(of: "<"),
+                  let end = field.firstIndex(of: ">"), start < end else { return false }
+            let flags = Set(field[field.index(after: start)..<end].split(separator: ","))
+            return flags.contains("HOST") && !flags.contains("WASCLONED")
+        }
+    }
+}
+
 private final class RouteStore {
     static let shared = RouteStore()
     private let directory = URL(fileURLWithPath: "/Library/Application Support/RouteDuo", isDirectory: true)
@@ -95,7 +107,7 @@ final class RouteHelper: NSObject, RouteHelperProtocol {
                 let result = RouteStore.shared.cleanup(owner: owner)
                 if !result.0 { return result }
             }
-            return (true, "RouteDuoHelper/2")
+            return (true, "RouteDuoHelper/3")
         }
     }
     private func parse(_ command: String, action: String) -> (String, String?)? {
@@ -121,7 +133,9 @@ final class RouteHelper: NSObject, RouteHelperProtocol {
             if store.routes.contains(route) { continue }
             // Preserve any host route that RouteDuo did not create.
             let existing = store.run(["-n", "get", ip])
-            if existing.0 && existing.1.split(separator: "\n").contains(where: { $0.contains("flags:") && $0.contains("HOST") }) {
+            // `route get` can return a HOST-marked lookup derived from a
+            // broader route. Only an exact destination is a conflicting host route.
+            if existing.0 && RouteLookup.hasExactHostRoute(existing.1, destination: ip) {
                 _ = store.cleanup(owner: owner)
                 return (false, "\(ip) 已有其他主机路由，未覆盖；请先检查已有路由")
             }
