@@ -47,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     private var updateTerminationPending = false
     private var enabledStatusImage: NSImage!
     private var disabledStatusImage: NSImage!
+    private var routingMessageWindow: NSWindow?
     private var aboutWindow: NSWindow?
     private weak var window: NSWindow?
     private var showingSettings = false
@@ -760,12 +761,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         toggleItem?.isEnabled = true
         updateHelperButton()
         logServiceOrder(message)
-        let alert = NSAlert()
-        alert.messageText = "辅助服务操作未完成"
-        alert.informativeText = message + "。可在设置窗口点击“修复辅助服务”。"
-        alert.addButton(withTitle: "知道了")
-        if let window, window.isVisible, window.attachedSheet == nil { alert.beginSheetModal(for: window) }
-        else if window?.attachedSheet == nil { DispatchQueue.main.async { alert.runModal() } }
+        showRoutingMessage("辅助服务操作未完成", message + "。可在设置窗口点击“修复辅助服务”。")
     }
 
     private func makeColumn(_ identifier: String, title: String, width: CGFloat) -> NSTableColumn {
@@ -2036,6 +2032,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
             alert.alertStyle = .informational
             alert.addButton(withTitle: helperInstalled() ? "修复辅助程序" : "安装辅助程序")
             alert.addButton(withTitle: "取消")
+            NSApp.activate(ignoringOtherApps: true)
             if alert.runModal() == .alertFirstButtonReturn {
                 installHelper()
             }
@@ -2046,12 +2043,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
 
     private func showRoutingMessage(_ title: String, _ message: String) {
         logServiceOrder("\(title)：\(message)")
+        // A modeless alert keeps Help/Export/Quit available even when a helper
+        // request fails while the app is running only in the menu bar.
+        routingMessageWindow?.close()
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
         alert.addButton(withTitle: "知道了")
+        let panel = alert.window
+        panel.isReleasedWhenClosed = false
+        alert.buttons.first?.target = self
+        alert.buttons.first?.action = #selector(dismissRoutingMessage)
+        routingMessageWindow = panel
         NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func dismissRoutingMessage() {
+        routingMessageWindow?.close()
+        routingMessageWindow = nil
     }
 
     @objc private func enableRoutes(automatically: Bool = false) {
@@ -2069,7 +2080,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         let topology = cachedTopologySnapshot() ?? currentTopology()
         guard let topology else {
             if automatically { return }
-            let alert = NSAlert(); alert.messageText = "暂时无法启用网络分流"; alert.informativeText = "当前只检测到一个可用网络，请连接第二个网络后再启用分流。"; alert.alertStyle = .warning; alert.addButton(withTitle: "知道了"); alert.runModal(); return
+            showRoutingMessage("暂时无法启用网络分流", "当前只检测到一个可用网络，请连接第二个网络后再启用分流。")
+            return
         }
         storeCachedTopology(topology)
         let available = immediatelyAvailableIPs(domains)
