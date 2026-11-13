@@ -4,6 +4,7 @@ import Foundation
 enum DiagnosticReport {
     static func collect(snapshot: String) -> String {
         var sections = [snapshot, "说明：仅采集本地状态，不访问外网，不更改网络配置。辅助程序状态为 App 最近一次检查结果。"]
+        // 仅查询本地配置，不访问外网；单项失败仍继续采集其余诊断信息。
         let commands: [(String, String, [String])] = [
             ("网络服务顺序", "/usr/sbin/networksetup", ["-listnetworkserviceorder"]),
             ("网络接口状态", "/sbin/ifconfig", ["-a"]),

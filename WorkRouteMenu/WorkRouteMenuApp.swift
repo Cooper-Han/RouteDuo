@@ -42,9 +42,11 @@ final class RouteAddressTableView: NSTableView {
 // Keep Sparkle's installation confirmation; restore focus after system authorization.
 final class RouteDuoUpdateUserDriver: SPUStandardUserDriver {
     override func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        // 保留 Sparkle 标准确认窗口及回调，由用户决定是否安装并重启。
         super.showReady(toInstallAndRelaunch: reply)
         // Authorization may have activated another app. Bring the standard
         // update window forward only at the ready-to-install transition.
+        // 等标准窗口完成创建后再恢复焦点，避免系统认证结束后被其他 App 遮挡。
         DispatchQueue.main.async {
             NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         }
@@ -55,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     private let routeRowPasteboardType = NSPasteboard.PasteboardType("com.cooper.RouteDuo.route-row")
     private var statusItem: NSStatusItem!
     private var updaterController: SPUUpdater!
+    // 持有自定义驱动，使用 Sparkle 标准 UI，仅调整准备安装时的窗口焦点。
     private var updateUserDriver: RouteDuoUpdateUserDriver!
     private var diagnosticExportInProgress = false
     private var updateTerminationPending = false
@@ -602,6 +605,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
 
     private func installSettingsClickMonitor() {
         if let settingsClickMonitor { NSEvent.removeMonitor(settingsClickMonitor) }
+        // 仅监听本 App 的设置窗口，不吞掉事件，也不影响按钮和编辑控件。
         settingsClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
             guard let self, let window = self.window, event.window === window,
                   let content = window.contentView, let table = self.routesTable else { return event }
@@ -2179,6 +2183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
             return .terminateCancel
         }
         guard routesEnabled || !appliedRouteIPs().isEmpty else { return .terminateNow }
+        // 退出/更新共用此流程；清理期间暂停自动启用，避免路由被再次添加。
         updateTerminationPending = true
         autoEnablePausedForSession = true
         requestHelper { proxy, reply in proxy.deleteRoutes([], withReply: reply) } completion: { [weak self] success, output in
@@ -2190,6 +2195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
             } else {
                 self.statusLabel?.stringValue = "无法确认路由清理完成，已取消退出：\(output)"
             }
+            // 与 terminateLater 配对；清理失败保留 App，便于重试和导出诊断。
             sender.reply(toApplicationShouldTerminate: success)
         }
         return .terminateLater

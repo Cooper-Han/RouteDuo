@@ -28,6 +28,7 @@ enum RouteLookup {
             guard field.hasPrefix("flags:"), let start = field.firstIndex(of: "<"),
                   let end = field.firstIndex(of: ">"), start < end else { return false }
             let flags = Set(field[field.index(after: start)..<end].split(separator: ","))
+            // WASCLONED 是系统按访问生成的缓存，不能当成用户配置的主机路由冲突。
             return flags.contains("HOST") && !flags.contains("WASCLONED")
         }
     }
