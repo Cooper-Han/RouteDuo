@@ -39,10 +39,23 @@ final class RouteAddressTableView: NSTableView {
     }
 }
 
+// Keep Sparkle's installation confirmation; restore focus after system authorization.
+final class RouteDuoUpdateUserDriver: SPUStandardUserDriver {
+    override func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        super.showReady(toInstallAndRelaunch: reply)
+        // Authorization may have activated another app. Bring the standard
+        // update window forward only at the ready-to-install transition.
+        DispatchQueue.main.async {
+            NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        }
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate, UNUserNotificationCenterDelegate {
     private let routeRowPasteboardType = NSPasteboard.PasteboardType("com.cooper.RouteDuo.route-row")
     private var statusItem: NSStatusItem!
-    private var updaterController: SPUStandardUpdaterController!
+    private var updaterController: SPUUpdater!
+    private var updateUserDriver: RouteDuoUpdateUserDriver!
     private var diagnosticExportInProgress = false
     private var updateTerminationPending = false
     private var enabledStatusImage: NSImage!
@@ -162,9 +175,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         menu.addItem(autoEnableItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "退出", action: #selector(quit), keyEquivalent: "q"))
-        updaterController = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: nil, userDriverDelegate: nil)
-        let updateItem = NSMenuItem(title: "检查更新…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
-        updateItem.target = updaterController
+        updateUserDriver = RouteDuoUpdateUserDriver(hostBundle: .main, delegate: nil)
+        updaterController = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: updateUserDriver, delegate: nil)
+        let updateItem = NSMenuItem(title: "检查更新…", action: #selector(checkForAppUpdates), keyEquivalent: "")
+        updateItem.target = self
         let aboutItem = NSMenuItem(title: "关于 RouteDuo…", action: #selector(showAbout), keyEquivalent: "")
         aboutItem.target = self
         let helpMenu = NSMenu(title: "帮助")
@@ -181,10 +195,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
             item.target = self
         }
         statusItem.menu = menu
-        updaterController.startUpdater()
+        do { try updaterController.start() }
+        catch { logServiceOrder("更新服务启动失败：\(error.localizedDescription)") }
         refreshHelperHealth()
         startNetworkMonitoring()
         refreshConfiguredDomainsInBackground()
+    }
+
+    @objc private func checkForAppUpdates() {
+        NSApp.activate(ignoringOtherApps: true)
+        updaterController.checkForUpdates()
     }
 
     @objc private func exportDiagnostics() {
