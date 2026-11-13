@@ -50,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     private var routingMessageWindow: NSWindow?
     private var aboutWindow: NSWindow?
     private weak var window: NSWindow?
+    private var settingsClickMonitor: Any?
     private var showingSettings = false
     private var routesTable: NSTableView!
     private var routeRows: [[String]] = [] // 地址、备注
@@ -505,6 +506,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         scroll.layer?.cornerRadius = 12
         scroll.layer?.masksToBounds = true
         routesTable = RouteAddressTableView(frame: .zero)
+        routesTable.allowsEmptySelection = true
         routesTable.style = .inset
         routesTable.rowHeight = 38
         routesTable.intercellSpacing = NSSize(width: 12, height: 2)
@@ -575,6 +577,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
             helperButton.trailingAnchor.constraint(equalTo: header.trailingAnchor)
         ])
         window = w
+        installSettingsClickMonitor()
+    }
+
+    private func installSettingsClickMonitor() {
+        if let settingsClickMonitor { NSEvent.removeMonitor(settingsClickMonitor) }
+        settingsClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            guard let self, let window = self.window, event.window === window,
+                  let content = window.contentView, let table = self.routesTable else { return event }
+            let point = content.convert(event.locationInWindow, from: nil)
+            guard content.bounds.contains(point), let hit = content.hitTest(point) else { return event }
+            let tablePoint = table.convert(event.locationInWindow, from: nil)
+            if table.visibleRect.contains(tablePoint), table.row(at: tablePoint) >= 0 { return event }
+            // Preserve buttons, header sorting, scrolling, and editable controls.
+            var ancestor: NSView? = hit
+            while let view = ancestor {
+                if view is NSButton || view is NSSegmentedControl || view is NSPopUpButton ||
+                    view is NSScroller || view is NSTableHeaderView || view is NSTextView { return event }
+                if let field = view as? NSTextField, field.isEditable { return event }
+                ancestor = view.superview
+            }
+            // Commit the field editor through its normal delegate before clearing selection.
+            if window.makeFirstResponder(nil) { table.deselectAll(nil) }
+            return event
+        }
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -2150,6 +2176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let settingsClickMonitor { NSEvent.removeMonitor(settingsClickMonitor) }
         stopNetworkMonitoring()
         helperConnection?.invalidate()
     }
