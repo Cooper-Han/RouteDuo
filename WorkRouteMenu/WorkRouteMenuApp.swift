@@ -2093,17 +2093,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
 
     private func showRoutingMessage(_ title: String, _ message: String) {
         logServiceOrder("\(title)：\(message)")
-        // A modeless alert keeps Help/Export/Quit available even when a helper
-        // request fails while the app is running only in the menu bar.
         routingMessageWindow?.close()
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.addButton(withTitle: "知道了")
-        let panel = alert.window
+        // NSAlert.window depends on NSAlert's presentation lifecycle for layout.
+        // Use a standalone panel for modeless messages so hidden alert controls
+        // cannot leak into the UI and the menu remains available.
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 440, height: 220),
+                            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        panel.title = "RouteDuo"
         panel.isReleasedWhenClosed = false
-        alert.buttons.first?.target = self
-        alert.buttons.first?.action = #selector(dismissRoutingMessage)
+        panel.hidesOnDeactivate = false
+        guard let content = panel.contentView else { return }
+        let icon = NSImageView(image: NSApp.applicationIconImage)
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        let heading = NSTextField(wrappingLabelWithString: title)
+        heading.font = .boldSystemFont(ofSize: 15)
+        heading.maximumNumberOfLines = 0
+        let detail = NSTextField(wrappingLabelWithString: message)
+        detail.font = .systemFont(ofSize: 13)
+        detail.textColor = .secondaryLabelColor
+        detail.maximumNumberOfLines = 0
+        detail.isSelectable = true
+        let button = NSButton(title: "知道了", target: self, action: #selector(dismissRoutingMessage))
+        button.bezelStyle = .rounded
+        button.keyEquivalent = "\r"
+        for view in [icon, heading, detail, button] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
+            icon.topAnchor.constraint(equalTo: content.topAnchor, constant: 24),
+            icon.widthAnchor.constraint(equalToConstant: 48),
+            icon.heightAnchor.constraint(equalToConstant: 48),
+            heading.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 16),
+            heading.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
+            heading.topAnchor.constraint(equalTo: icon.topAnchor),
+            detail.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
+            detail.trailingAnchor.constraint(equalTo: heading.trailingAnchor),
+            detail.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 10),
+            button.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
+            button.topAnchor.constraint(greaterThanOrEqualTo: detail.bottomAnchor, constant: 24),
+            button.topAnchor.constraint(greaterThanOrEqualTo: icon.bottomAnchor, constant: 24),
+            button.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -20),
+            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 80)
+        ])
+        // Measure with the same text width as the constraints, including long
+        // helper errors; do not truncate the reason to a fixed number of lines.
+        func textHeight(_ text: String, font: NSFont) -> CGFloat {
+            ceil((text as NSString).boundingRect(with: NSSize(width: 328, height: CGFloat.greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: font]).height) + 4
+        }
+        let textSize = textHeight(title, font: heading.font!) + 10 + textHeight(message, font: detail.font!)
+        panel.setContentSize(NSSize(width: 440, height: max(48, textSize) + 24 + 24 + 32 + 20))
         routingMessageWindow = panel
         NSApp.activate(ignoringOtherApps: true)
         panel.center()
